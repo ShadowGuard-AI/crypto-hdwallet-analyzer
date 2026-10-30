@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # crypto-hdwallet-analyzer
 Scans Hierarchical Deterministic (HD) wallets (e.g., Bitcoin, Ethereum) for weak or compromised seeds, derivation paths, and key reuse. Detects potential vulnerabilities arising from poor key management practices. - Focused on Basic cryptographic operations
 
