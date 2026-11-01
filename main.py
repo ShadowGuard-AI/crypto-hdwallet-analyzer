@@ -26,12 +26,18 @@ class KeyReuseCheckError(Exception):
 
 
 def _point_add(p, q):
+    # None stands for the point at infinity all through this file, so
+    # adding it returns the other point unchanged.
     if p is None:
         return q
     if q is None:
         return p
     x1, y1 = p
     x2, y2 = q
+    # Same x and y values that cancel means the points are inverses, and
+    # the sum is infinity. This has to be checked before the doubling
+    # branch below, because a point with y == 0 would land here too and
+    # the doubling formula would try to invert zero.
     if x1 == x2 and (y1 + y2) % _P == 0:
         return None
     if p == q:
@@ -46,6 +52,8 @@ def _point_add(p, q):
 def _point_mul(k, point=None):
     if point is None:
         point = _G
+    # Double and add over the bits of k. result starts at infinity, so
+    # k == 0 returns None, which callers treat as an invalid point.
     result = None
     addend = point
     while k:
@@ -57,6 +65,9 @@ def _point_mul(k, point=None):
 
 
 def _ser_p(point):
+    # Compressed form: x alone, with the prefix carrying the parity of y
+    # so y can be recovered. Every hash, fingerprint, and comparison in
+    # this file uses this form, never the uncompressed one.
     x, y = point
     prefix = b"\x03" if y % 2 else b"\x02"
     return prefix + x.to_bytes(32, 'big')
@@ -77,6 +88,9 @@ def _base58check(payload):
     while num > 0:
         num, rem = divmod(num, 58)
         encoded = _BASE58_ALPHABET[rem] + encoded
+    # The integer conversion above drops leading zero bytes, and in
+    # base58check each one is a literal "1". I count them off the
+    # original bytes, before that information is gone.
     pad = 0
     for byte in data:
         if byte == 0:
@@ -106,6 +120,11 @@ def _master_node(seed):
 
 
 def _ckd_priv(node, index):
+    # The split here is the whole point of hardened derivation: a
+    # hardened step hashes the private key itself (with a zero byte in
+    # front to keep the length equal), so it cannot be reproduced from
+    # the parent public key. A normal step hashes the public point,
+    # which is what lets _ckd_pub mirror it from an xpub.
     if index >= _HARDENED:
         data = b"\x00" + node["private"].to_bytes(32, 'big') + struct.pack(">L", index)
     else:
@@ -181,6 +200,9 @@ def parse_derivation_path(derivation_path):
             value = int(name)
         except ValueError:
             raise ValueError(f"Invalid derivation path component: {component!r}")
+        # The range check runs on the bare value, before the hardened
+        # offset is added, so the largest accepted index plus the offset
+        # still fits the 4 byte field _ckd_priv packs it into.
         if value < 0 or value >= _HARDENED:
             raise ValueError(f"Derivation path component out of range: {component!r}")
         indices.append(value + _HARDENED if hardened else value)
@@ -267,6 +289,11 @@ def check_key_reuse(private_key_hex, public_key_file):
         raise KeyReuseCheckError(f"Public key file not found: {public_key_file}")
     except Exception as e:
         raise KeyReuseCheckError(f"Error reading public key file: {e}")
+    # Exact string match against the compressed hex form this file
+    # derives. A list holding uncompressed keys, or the same key in
+    # upper case, will read as no reuse even when the key is in it. I
+    # leave that strictness in and name it here rather than guessing at
+    # formats the file might contain.
     for line in lines:
         if derived_public_key_hex == line.strip():
             logging.warning("Key reuse detected! Derived public key found in the public key list.")
